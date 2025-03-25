@@ -14,13 +14,93 @@ path operator""_p(const char* data, std::size_t sz) {
     return path(data, data + sz);
 }
 
-// напишите эту функцию
-bool Preprocess(const path& in_file, const path& out_file, const vector<path>& include_directories);
+bool PreprocessInternal(ifstream& input, ofstream&output, const path& in_file, const vector<path>&include_directories) {
+    static regex custom_dir(R"/(\s*#\s*include\s*"([^"]*)"\s*)/");
+    static regex std_dir(R"/(\s*#\s*include\s*<([^>]*)>\s*)/");
+    smatch m;
+
+    string str;
+    int str_line = 0;
+    path file_path;
+    bool finded_custom = true;
+
+    while(getline(input, str)) {
+        ++str_line;
+        if (regex_match(str, m, custom_dir)) {
+            file_path = in_file.parent_path() / string(m[1]);
+            if (filesystem::exists(file_path)) {
+                ifstream new_input(file_path);
+                if(new_input.is_open()) {
+                    if (!PreprocessInternal(new_input, output, file_path, include_directories)) {
+                        cout << "unknown include file "s << file_path.filename().string() 
+                        << " at file "s << in_file.string() << " at line "s << str_line << "\n";
+                        return false;
+                    }
+                    continue;
+                }else {
+                    cout << "unknown include file "s << file_path.filename().string() 
+                        << " at file "s << in_file.string() << " at line "s << str_line << "\n";
+                        return false;
+                }
+            }else {
+                finded_custom = false;
+            }
+        }
+
+        if (!finded_custom || regex_match(str, m, std_dir)) {
+            bool finded_cus_or_std = false;
+            for (const auto& dir : include_directories) {
+                file_path = dir / string(m[1]);
+                if (!filesystem::exists(file_path)) {
+                    finded_cus_or_std = false;
+                }else {
+                    ifstream new_input(file_path);
+                    if (new_input.is_open()) {
+                        if (!PreprocessInternal(new_input, output, file_path, include_directories)) {
+                            cout << "unknown include file "s << file_path.filename().string() 
+                            << " at file "s << in_file.string() << " at line "s << str_line << "\n";
+                            return false;
+                        }
+                        finded_cus_or_std = true;
+                        break;
+                    }
+                }
+            }
+            if (!finded_cus_or_std) {
+                cout << "unknown include file "s << file_path.filename().string() 
+                        << " at file "s << in_file.string() << " at line "s << str_line << "\n";
+                        return false;
+            }
+            finded_custom = true;
+            continue;
+        }
+
+        output << str << "\n"s;
+    }
+
+    return true;
+}
+
+
+bool Preprocess(const path& in_file, const path& out_file, const vector<path>& include_directories) {
+    if (!filesystem::exists(in_file)) {
+        return false;
+    }
+    ifstream input(in_file);
+    if (!input.is_open()) {
+        return false;
+    }
+    ofstream output(out_file);
+    if (!output.is_open()) {
+        return false;
+    }
+
+    return PreprocessInternal(input, output, in_file, include_directories);
+}
 
 string GetFileContents(string file) {
     ifstream stream(file);
 
-    // конструируем string по двум итераторам
     return {(istreambuf_iterator<char>(stream)), istreambuf_iterator<char>()};
 }
 
